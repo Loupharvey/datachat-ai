@@ -1,0 +1,7 @@
+Customer,Region,Purchase Date,Product,Amount
+Alice,North,2024-01-05,Widget A,250
+Bob,West,2024-01-10,Widget B,340
+Charlie,North,2024-02-12,Widget A,125
+Alice,South,2024-03-05,Widget C,470
+Diana,West,2024-03-18,Widget B,190
+Charlie,East,2024-04-01,Widget D,310
