@@ -1,0 +1,13 @@
+streamlit
+pandas
+openai
+langchain>=0.0.195
+langchain-community
+langchain-experimental
+tabulate
+openpyxl
+pdf2image
+pytesseract
+chromadb
+faiss-cpu
+pymupdf
