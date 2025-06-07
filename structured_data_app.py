@@ -1,19 +1,18 @@
 # structured_data_app.py
 
-import os
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
+
 
 # LangChain & OpenAI imports
 from langchain_openai import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
 
-# Load API key
-load_dotenv()
-API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Read API key directly from Streamlit secrets
+API_KEY = st.secrets["OPENAI_API_KEY"]
 if not API_KEY:
-    st.error("🔑 No OPENAI_API_KEY found in .env")
+    st.error("🔑 No OPENAI_API_KEY found in Streamlit secrets!")
     st.stop()
 
 # Install note:
