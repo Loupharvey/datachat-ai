@@ -3,6 +3,13 @@
 import pandas as pd
 import streamlit as st
 
+# — Basic Password Auth —————————————————————————————
+PASSWORD = st.secrets["PASSWORD"]
+pw = st.sidebar.text_input("🔒 Enter app password", type="password")
+if pw != PASSWORD:
+    st.error("❌ Incorrect password")
+    st.stop()
+# — End Basic Auth ————————————————————————————————————
 
 # LangChain & OpenAI imports
 try:
