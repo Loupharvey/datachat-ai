@@ -26,31 +26,30 @@ if password != PASSWORD:
 installed = [dist.metadata["Name"] for dist in importlib.metadata.distributions()]
 st.sidebar.write("🔍 Packages starting with 'sentry':", [n for n in installed if n.lower().startswith("sentry")])
 
-# 🌐 Initialize Sentry if configured
-dsn = st.secrets.get("SENTRY_DSN")
-if dsn:
-    from sentry_sdk import init as sentry_init
-    from sentry_sdk.integrations.logging import LoggingIntegration
+# 🌐 Initialize Sentry SDK (with explicit DSN and PII)
+import sentry_sdk
+from sentry_sdk.integrations.logging import LoggingIntegration
 
-    logging_integration = LoggingIntegration(
-        level=logging.INFO,
-        event_level=logging.ERROR
-    )
-    sentry_init(
-        dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
-        integrations=[logging_integration],
-        traces_sample_rate=0.1,
-        send_default_pii=True,
-    )
-    logger = logging.getLogger(__name__)
-    logger.info("Sentry initialized for DataChat AI app.")
+logging_integration = LoggingIntegration(
+    level=logging.INFO,
+    event_level=logging.ERROR
+)
+# Initialize Sentry SDK with your DSN
+sentry_sdk.init(
+    dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
+    integrations=[logging_integration],
+    traces_sample_rate=0.1,
+    # Add data like request headers and IP for users
+    send_default_pii=True,
+)
 
-    # 🔔 One-time Sentry verification: raise error on first run
-    if "sentry_tested" not in st.session_state:
-        st.session_state.sentry_tested = True
-        1 / 0
-        
-division = 1 / 0
+logger = logging.getLogger(__name__)
+logger.info("Sentry initialized for DataChat AI app.")
+
+# 🔔 One-time Sentry verification message
+if not st.session_state.get("sentry_tested"):
+    st.session_state["sentry_tested"] = True
+    sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -99,13 +98,11 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
-    # Read and cache DataFrame
     file_bytes = uploaded_file.read()
     df = get_dataframe(file_bytes, uploaded_file.name)
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
     st.dataframe(df.head())
 
-    # Create or retrieve the agent
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
     if st.button("🤖 Ask DataChat"):
