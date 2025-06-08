@@ -11,3 +11,6 @@ pytesseract
 chromadb
 faiss-cpu
 pymupdf
+pillow
+sentry-sdk
+setuptools
