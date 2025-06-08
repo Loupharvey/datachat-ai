@@ -1,4 +1,5 @@
 import os
+import io
 import logging
 import streamlit as st
 import pandas as pd
@@ -44,9 +45,9 @@ if dsn:
     logger = logging.getLogger(__name__)
     logger.info("Sentry initialized for DataChat AI app.")
 
-    # 🔥 Test Sentry integration
-    if st.sidebar.button("💥 Test Sentry"):
-        # This will raise an unhandled exception and be captured by Sentry
+    # 🔔 One-time Sentry verification: raise error on first run
+    if "sentry_tested" not in st.session_state:
+        st.session_state.sentry_tested = True
         1 / 0
 
 # 🔑 Load OpenAI API key
@@ -66,18 +67,18 @@ except ImportError:
 
 from langchain_experimental.agents import create_pandas_dataframe_agent
 
-# 🗂️ Caching utilities
-def load_dataframe(uploaded_file):
-    if uploaded_file.name.lower().endswith((".xls", ".xlsx")):
-        return pd.read_excel(uploaded_file)
-    return pd.read_csv(uploaded_file)
-
+# 🗂️ Caching utilities using bytes for hashability
 @st.cache_data
-def get_dataframe(file):
-    return load_dataframe(file)
+
+def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    buffer = io.BytesIO(file_bytes)
+    if filename.lower().endswith((".xls", ".xlsx")):
+        return pd.read_excel(buffer)
+    return pd.read_csv(buffer)
 
 @st.cache_resource
-def get_agent(df):
+# Cache the agent (keyed on the DataFrame object)
+def get_agent(df: pd.DataFrame):
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, temperature=0)
     return create_pandas_dataframe_agent(
         llm,
@@ -96,10 +97,13 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
-    df = get_dataframe(uploaded_file)
+    # Read and cache DataFrame
+    file_bytes = uploaded_file.read()
+    df = get_dataframe(file_bytes, uploaded_file.name)
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
     st.dataframe(df.head())
 
+    # Create or retrieve the agent
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
     if st.button("🤖 Ask DataChat"):
