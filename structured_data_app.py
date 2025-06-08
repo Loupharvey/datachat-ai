@@ -4,6 +4,9 @@ import pandas as pd
 import streamlit as st
 import pkg_resources
 
+# 1️⃣ PAGE CONFIG must come first
+st.set_page_config(page_title="📊 DataChat AI", layout="centered")
+
 # Debug: list any installed packages that start with "sentry"
 installed = {pkg.key for pkg in pkg_resources.working_set}
 sentry_installed = any(name.startswith("sentry") for name in installed)
@@ -31,8 +34,6 @@ if st.sidebar.button("💥 Test Sentry"):
 # ——————————————————————————————————————————————
 # … rest of your app …
 
-# 1️⃣ PAGE CONFIG must come first
-st.set_page_config(page_title="📊 DataChat AI", layout="centered")
 
 # — Basic Password Auth —————————————————————————————
 PASSWORD = st.secrets["PASSWORD"]
