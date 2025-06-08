@@ -50,6 +50,7 @@ if dsn:
         st.session_state.sentry_tested = True
         1 / 0
         
+division = 1 / 0
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
