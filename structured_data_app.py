@@ -2,6 +2,14 @@
 
 import pandas as pd
 import streamlit as st
+import pkg_resources
+
+# Debug: list any installed packages that start with "sentry"
+installed = {pkg.key for pkg in pkg_resources.working_set}
+sentry_installed = any(name.startswith("sentry") for name in installed)
+st.write("🔍 sentry-sdk installed?", sentry_installed)
+st.write("🔍 Found packages:", sorted([name for name in installed if name.startswith("sentry")]))
+
 import sentry_sdk
 
 sentry_sdk.init(
