@@ -10,6 +10,19 @@ sentry_sdk.init(
     # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
     send_default_pii=True,
 )
+
+# … your Sentry init and logger setup above …
+
+# ——————————————————————————————————————————————
+# 🔥 Test Sentry integration
+# ——————————————————————————————————————————————
+if st.sidebar.button("💥 Test Sentry"):
+    # This will raise an unhandled exception and be captured by Sentry
+    1 / 0
+
+# ——————————————————————————————————————————————
+# … rest of your app …
+
 # 1️⃣ PAGE CONFIG must come first
 st.set_page_config(page_title="📊 DataChat AI", layout="centered")
 
