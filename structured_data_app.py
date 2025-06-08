@@ -1,4 +1,4 @@
-import os
+iimport os
 import logging
 import streamlit as st
 import pandas as pd
@@ -30,6 +30,7 @@ dsn = st.secrets.get("SENTRY_DSN")
 if dsn:
     from sentry_sdk import init as sentry_init
     from sentry_sdk.integrations.logging import LoggingIntegration
+
     logging_integration = LoggingIntegration(
         level=logging.INFO,
         event_level=logging.ERROR
@@ -42,6 +43,11 @@ if dsn:
     )
     logger = logging.getLogger(__name__)
     logger.info("Sentry initialized for DataChat AI app.")
+
+    # 🔥 Test Sentry integration
+    if st.sidebar.button("💥 Test Sentry"):
+        # This will raise an unhandled exception and be captured by Sentry
+        1 / 0
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -67,12 +73,10 @@ def load_dataframe(uploaded_file):
     return pd.read_csv(uploaded_file)
 
 @st.cache_data
-# Cache data loading for performance
 def get_dataframe(file):
     return load_dataframe(file)
 
 @st.cache_resource
-# Cache the agent to avoid re-initializing
 def get_agent(df):
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, temperature=0)
     return create_pandas_dataframe_agent(
