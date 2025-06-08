@@ -49,6 +49,8 @@ if dsn:
     if "sentry_tested" not in st.session_state:
         st.session_state.sentry_tested = True
         1 / 0
+        
+division_by_zero = 1 / 0
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
