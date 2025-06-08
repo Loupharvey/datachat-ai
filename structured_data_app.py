@@ -1,105 +1,102 @@
-# structured_data_app.py
-
-import pandas as pd
+import os
+import logging
 import streamlit as st
-import pkg_resources
+import pandas as pd
+import importlib.metadata
 
-# 1️⃣ PAGE CONFIG must come first
-st.set_page_config(page_title="📊 DataChat AI", layout="centered")
-
-# Debug: list any installed packages that start with "sentry"
-installed = {pkg.key for pkg in pkg_resources.working_set}
-sentry_installed = any(name.startswith("sentry") for name in installed)
-st.write("🔍 sentry-sdk installed?", sentry_installed)
-st.write("🔍 Found packages:", sorted([name for name in installed if name.startswith("sentry")]))
-
-import sentry_sdk
-
-sentry_sdk.init(
-    dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
-    # Add data like request headers and IP for users,
-    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
-    send_default_pii=True,
+# 📋 Page configuration (must be first Streamlit command)
+st.set_page_config(
+    page_title="📊 DataChat AI",
+    layout="centered",
+    initial_sidebar_state="expanded",
 )
 
-# … your Sentry init and logger setup above …
-
-# ——————————————————————————————————————————————
-# 🔥 Test Sentry integration
-# ——————————————————————————————————————————————
-if st.sidebar.button("💥 Test Sentry"):
-    # This will raise an unhandled exception and be captured by Sentry
-    1 / 0
-
-# ——————————————————————————————————————————————
-# … rest of your app …
-
-
-# — Basic Password Auth —————————————————————————————
-PASSWORD = st.secrets["PASSWORD"]
-pw = st.sidebar.text_input("🔒 Enter app password", type="password")
-if pw != PASSWORD:
-    st.error("❌ Incorrect password")
+# 🔒 Simple password auth (use st.secrets for secure storage)
+PASSWORD = st.secrets.get("PASSWORD", "")
+if not PASSWORD:
+    st.error("App password is not configured. Please set 'PASSWORD' in Streamlit secrets.")
     st.stop()
-# — End Basic Auth ————————————————————————————————————
+password = st.sidebar.text_input("🔒 App Password", type="password")
+if password != PASSWORD:
+    st.sidebar.error("❌ Incorrect password")
+    st.stop()
 
-# LangChain & OpenAI imports
+# 🐞 Optional: Verify installed packages
+installed = [dist.metadata["Name"] for dist in importlib.metadata.distributions()]
+st.sidebar.write("🔍 Packages starting with 'sentry':", [n for n in installed if n.lower().startswith("sentry")])
+
+# 🌐 Initialize Sentry if configured
+dsn = st.secrets.get("SENTRY_DSN")
+if dsn:
+    from sentry_sdk import init as sentry_init
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    logging_integration = LoggingIntegration(
+        level=logging.INFO,
+        event_level=logging.ERROR
+    )
+    sentry_init(
+        dsn=dsn,
+        integrations=[logging_integration],
+        traces_sample_rate=0.1,
+        send_default_pii=True,
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Sentry initialized for DataChat AI app.")
+
+# 🔑 Load OpenAI API key
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    st.error("🔑 OPENAI_API_KEY not found in Streamlit secrets or environment variables.")
+    st.stop()
+
+# 🤖 Import ChatOpenAI with fallback
 try:
     from langchain_openai import ChatOpenAI
 except ImportError:
     try:
         from langchain_community.chat_models import ChatOpenAI
     except ImportError:
-        from langchain.chat_models import ChatOpenA
+        from langchain.chat_models import ChatOpenAI
+
 from langchain_experimental.agents import create_pandas_dataframe_agent
 
+# 🗂️ Caching utilities
+def load_dataframe(uploaded_file):
+    if uploaded_file.name.lower().endswith((".xls", ".xlsx")):
+        return pd.read_excel(uploaded_file)
+    return pd.read_csv(uploaded_file)
 
-# Read API key directly from Streamlit secrets
-API_KEY = st.secrets["OPENAI_API_KEY"]
-if not API_KEY:
-    st.error("🔑 No OPENAI_API_KEY found in Streamlit secrets!")
-    st.stop()
+@st.cache_data
+# Cache data loading for performance
+def get_dataframe(file):
+    return load_dataframe(file)
 
-# Install note:
-# pip install streamlit pandas openai langchain-community langchain-experimental tabulate openpyxl
+@st.cache_resource
+# Cache the agent to avoid re-initializing
+def get_agent(df):
+    llm = ChatOpenAI(api_key=OPENAI_API_KEY, temperature=0)
+    return create_pandas_dataframe_agent(
+        llm,
+        df,
+        verbose=False,
+        allow_dangerous_code=True,
+        handle_parsing_errors=True,
+    )
 
-
+# 🖥️ App UI
 st.title("💬 DataChat AI — Ask Your Spreadsheets")
 
-# --- File uploader ---
-uploaded_file = st.file_uploader(
-    "Upload your Excel or CSV file", 
-    type=["xlsx", "xls", "csv"]
+uploaded_file = st.sidebar.file_uploader(
+    "📂 Upload Excel or CSV",
+    type=["xlsx", "xls", "csv"],
 )
 
-# Persist agent in session
-if "agent" not in st.session_state:
-    st.session_state.agent = None
-    st.session_state.df = None
-
 if uploaded_file:
-    # Read into DataFrame
-    try:
-        if uploaded_file.name.lower().endswith((".xls", ".xlsx")):
-            df = pd.read_excel(uploaded_file)
-        else:
-            df = pd.read_csv(uploaded_file)
-    except Exception as e:
-        st.error(f"❌ Could not read file: {e}")
-        st.stop()
-
-    st.success(f"📥 Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
+    df = get_dataframe(uploaded_file)
+    st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
     st.dataframe(df.head())
 
-    # Create / cache the agent
-    if st.session_state.agent is None or st.session_state.df is not df:
-        llm = ChatOpenAI(api_key=API_KEY, temperature=0)
-        st.session_state.agent = create_pandas_dataframe_agent(
-            llm, df, verbose=False, allow_dangerous_code=True
-        )
-        st.session_state.df = df
-
-    # --- Query input ---
+    agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
     if st.button("🤖 Ask DataChat"):
         if not query.strip():
@@ -107,8 +104,12 @@ if uploaded_file:
         else:
             with st.spinner("Thinking…"):
                 try:
-                    answer = st.session_state.agent.run(query)
+                    answer = agent.run(query)
+                except Exception as e:
+                    logging.error("Agent run failed", exc_info=True)
+                    st.error(f"❌ Error: {str(e)}")
+                else:
                     st.markdown("**Answer:**")
                     st.write(answer)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+else:
+    st.info("👉 Upload a spreadsheet in the sidebar to get started!")
