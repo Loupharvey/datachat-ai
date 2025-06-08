@@ -37,7 +37,7 @@ if dsn:
         event_level=logging.ERROR
     )
     sentry_init(
-        dsn=dsn,
+        dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
         integrations=[logging_integration],
         traces_sample_rate=0.1,
         send_default_pii=True,
@@ -50,7 +50,6 @@ if dsn:
         st.session_state.sentry_tested = True
         1 / 0
         
-division_by_zero = 1 / 0
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
