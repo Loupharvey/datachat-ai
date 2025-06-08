@@ -2,6 +2,16 @@
 
 import pandas as pd
 import streamlit as st
+import sentry_sdk
+
+sentry_sdk.init(
+    dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
+    # Add data like request headers and IP for users,
+    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+    send_default_pii=True,
+)
+# 1️⃣ PAGE CONFIG must come first
+st.set_page_config(page_title="📊 DataChat AI", layout="centered")
 
 # — Basic Password Auth —————————————————————————————
 PASSWORD = st.secrets["PASSWORD"]
@@ -31,7 +41,7 @@ if not API_KEY:
 # Install note:
 # pip install streamlit pandas openai langchain-community langchain-experimental tabulate openpyxl
 
-st.set_page_config(page_title="📊 DataChat AI", layout="centered")
+
 st.title("💬 DataChat AI — Ask Your Spreadsheets")
 
 # --- File uploader ---
