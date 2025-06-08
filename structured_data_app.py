@@ -5,7 +5,18 @@ import streamlit as st
 import pandas as pd
 import importlib.metadata
 
-# 📋 Page configuration (must be first Streamlit command)
+# LangChain imports
+from langchain.schema import SystemMessage
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    try:
+        from langchain_community.chat_models import ChatOpenAI
+    except ImportError:
+        from langchain.chat_models import ChatOpenAI
+from langchain_experimental.agents import create_pandas_dataframe_agent
+
+# 📋 Page configuration (must come first)
 st.set_page_config(
     page_title="📊 DataChat AI",
     layout="centered",
@@ -22,34 +33,33 @@ if password != PASSWORD:
     st.sidebar.error("❌ Incorrect password")
     st.stop()
 
-# 🐞 Optional: Verify installed packages
-installed = [dist.metadata["Name"] for dist in importlib.metadata.distributions()]
-st.sidebar.write("🔍 Packages starting with 'sentry':", [n for n in installed if n.lower().startswith("sentry")])
+# 🐞 Verify sentry-sdk presence
+installed = [dist.metadata.get("Name") for dist in importlib.metadata.distributions()]
+st.sidebar.write("🔍 Installed packages starting with 'sentry':", [n for n in installed if n and n.lower().startswith("sentry")])
 
-# 🌐 Initialize Sentry SDK (with explicit DSN and PII)
-import sentry_sdk
-from sentry_sdk.integrations.logging import LoggingIntegration
+# 🌐 Initialize Sentry SDK if configured and send a test message once
+dsn = st.secrets.get("SENTRY_DSN")
+if dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
 
-logging_integration = LoggingIntegration(
-    level=logging.INFO,
-    event_level=logging.ERROR
-)
-# Initialize Sentry SDK with your DSN
-sentry_sdk.init(
-    dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
-    integrations=[logging_integration],
-    traces_sample_rate=0.1,
-    # Add data like request headers and IP for users
-    send_default_pii=True,
-)
+    logging_integration = LoggingIntegration(
+        level=logging.INFO,
+        event_level=logging.ERROR,
+    )
+    sentry_sdk.init(
+        dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
+        integrations=[logging_integration],
+        traces_sample_rate=0.1,
+        send_default_pii=True,
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Sentry initialized for DataChat AI app.")
 
-logger = logging.getLogger(__name__)
-logger.info("Sentry initialized for DataChat AI app.")
-
-# 🔔 One-time Sentry verification message
-if not st.session_state.get("sentry_tested"):
-    st.session_state["sentry_tested"] = True
-    sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
+    # 🔔 One-time Sentry verification message
+    if not st.session_state.get("sentry_tested"):
+        st.session_state["sentry_tested"] = True
+        sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -57,20 +67,8 @@ if not OPENAI_API_KEY:
     st.error("🔑 OPENAI_API_KEY not found in Streamlit secrets or environment variables.")
     st.stop()
 
-# 🤖 Import ChatOpenAI with fallback
-try:
-    from langchain_openai import ChatOpenAI
-except ImportError:
-    try:
-        from langchain_community.chat_models import ChatOpenAI
-    except ImportError:
-        from langchain.chat_models import ChatOpenAI
-
-from langchain_experimental.agents import create_pandas_dataframe_agent
-
 # 🗂️ Caching utilities using bytes for hashability
 @st.cache_data
-
 def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
     buffer = io.BytesIO(file_bytes)
     if filename.lower().endswith((".xls", ".xlsx")):
@@ -78,15 +76,22 @@ def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
     return pd.read_csv(buffer)
 
 @st.cache_resource
-# Cache the agent (keyed on the DataFrame object)
 def get_agent(df: pd.DataFrame):
-    llm = ChatOpenAI(api_key=OPENAI_API_KEY, temperature=0)
+    # System prompt: act as expert data analyst
+    system_msg = SystemMessage(content=(
+        "You are an expert data analyst. Given the DataFrame, provide clear, concise insights, "
+        "and if necessary, generate Python/pandas code to compute your answers. "
+        "Start with a brief summary of the data before answering the user's question."
+    ))
+    # Use GPT-4 with deterministic output
+    llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
     return create_pandas_dataframe_agent(
         llm,
         df,
         verbose=False,
         allow_dangerous_code=True,
         handle_parsing_errors=True,
+        prefix_messages=[system_msg],
     )
 
 # 🖥️ App UI
