@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import logging
 import streamlit as st
 import pandas as pd
@@ -117,6 +118,8 @@ if uploaded_file:
             with st.spinner("Thinking…"):
                 try:
                     answer = agent.run(query)
+                    # Fix runs-together sentences by ensuring a space after periods
+                    answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
                 except Exception as e:
                     logging.error("Agent run failed", exc_info=True)
                     st.error(f"❌ Error: {str(e)}")
