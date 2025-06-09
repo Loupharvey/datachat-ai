@@ -99,34 +99,39 @@ if uploaded_file:
             st.warning("Please enter a question.")
         else:
             q = query.lower()
-            # identify numeric columns and category column
             num_cols = df.select_dtypes(include="number").columns
             cat_col = next((c for c in df.columns if "type" in c.lower()), None)
 
             # direct computation for common requests
             if ("each revenue" in q or "for each revenue" in q) and cat_col:
-                # sum positives per category across all numeric columns
                 df_pos = df.copy()
                 df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
                 grouped = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
+                # exclude zeros and sort descending
+                grouped = grouped[grouped > 0].sort_values(ascending=False)
                 st.table(grouped.rename_axis(cat_col).reset_index(name="Total Revenue"))
+
             elif ("each cost" in q or "for each cost" in q) and cat_col:
-                # sum absolute negatives per category
                 df_neg = df.copy()
                 df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
                 grouped = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
+                grouped = grouped[grouped > 0].sort_values(ascending=False)
                 st.table(grouped.rename_axis(cat_col).reset_index(name="Total Cost"))
+
             elif "total revenue" in q:
                 total_rev = df[num_cols].clip(lower=0).sum().sum()
                 st.markdown(f"**Total revenue:** {total_rev:,.2f}")
+
             elif "total cost" in q:
                 total_cost = df[num_cols].clip(upper=0).abs().sum().sum()
                 st.markdown(f"**Total cost:** {total_cost:,.2f}")
+
             elif "profitability" in q:
                 rev = df[num_cols].clip(lower=0).sum().sum()
                 cost = df[num_cols].clip(upper=0).abs().sum().sum()
                 profit = rev - cost
                 st.markdown(f"**Profitability:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+
             else:
                 with st.spinner("Thinking…"):
                     try:
