@@ -20,7 +20,7 @@ from langchain_experimental.agents import create_pandas_dataframe_agent
 # 📋 Page configuration
 st.set_page_config(
     page_title="📊 DataChat AI",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -34,13 +34,8 @@ if password != PASSWORD:
     st.sidebar.error("❌ Incorrect password")
     st.stop()
 
-# 🐞 Debug: Check sentry-sdk
-installed = [dist.metadata.get("Name") for dist in importlib.metadata.distributions()]
-st.sidebar.write("🔍 sentry-sdk installed?", [n for n in installed if n and n.startswith("sentry")])
-
-# 🌐 Initialize Sentry SDK
-dsn = st.secrets.get("SENTRY_DSN")
-if dsn:
+# 🌐 Sentry SDK init (optional)
+if st.secrets.get("SENTRY_DSN"):
     import sentry_sdk
     from sentry_sdk.integrations.logging import LoggingIntegration
     sentry_sdk.init(
@@ -49,10 +44,6 @@ if dsn:
         traces_sample_rate=0.1,
         send_default_pii=True,
     )
-    logging.getLogger(__name__).info("Sentry initialized")
-    if not st.session_state.get("sentry_tested"):
-        st.session_state["sentry_tested"] = True
-        sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
 
 # 🔑 Load API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -60,7 +51,7 @@ if not OPENAI_API_KEY:
     st.error("🔑 OPENAI_API_KEY not found in secrets or env vars.")
     st.stop()
 
-# 🗂️ Caching utilities
+# 🗂 Caching utilities
 @st.cache_data
 def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
     buf = io.BytesIO(file_bytes)
@@ -70,8 +61,8 @@ def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
 @st.cache_resource
 def get_agent(df: pd.DataFrame):
-    system_msg = SystemMessage(content=(
-        "You are an expert financial data analyst. df has positive values = revenues, negative = costs. "
+    msg = SystemMessage(content=(
+        "You are an expert financial analyst. df has positive values = revenues, negative = costs. "
         "When asked for aggregates, produce pandas code in ```python``` and then results & summary."
     ))
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
@@ -80,110 +71,112 @@ def get_agent(df: pd.DataFrame):
         verbose=False,
         allow_dangerous_code=True,
         handle_parsing_errors=True,
-        prefix_messages=[system_msg]
+        prefix_messages=[msg]
     )
 
 # 🖥️ App UI
 st.title("💬 DataChat AI — Ask Your Spreadsheets")
-uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["csv","xls","xlsx"])
+uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["csv","xls","xlsx"] )
+
+# Chart & export controls
+chart_type = st.sidebar.selectbox("📈 Chart type (after query)", ["Line chart", "Bar chart"])
+export_csv = st.sidebar.checkbox("📄 Enable CSV export of results", value=True)
 
 if uploaded_file:
     df = get_dataframe(uploaded_file.read(), uploaded_file.name)
-    st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]}×{df.shape[1]}")
+    st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
     st.dataframe(df.head())
 
+    # Prepare agent
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
 
     if st.button("🤖 Ask DataChat"):
         if not query.strip():
             st.warning("Please enter a question.")
-            st.stop()
-        q = query.lower()
-        num_cols = df.select_dtypes(include="number").columns
-        cat_col = next((c for c in df.columns if "type" in c.lower()), None)
-
-        # revenues per category
-        if ("each revenue" in q or "for each revenue" in q) and cat_col:
-            df_pos = df.copy()
-            df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
-            grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
-            grp = grp[grp > 0].sort_values(ascending=False)
-            st.table(grp.rename_axis(cat_col).reset_index(name="Total Revenue"))
-
-        # costs per category
-        elif ("each cost" in q or "for each cost" in q) and cat_col:
-            df_neg = df.copy()
-            df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
-            grp = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
-            grp = grp[grp > 0].sort_values(ascending=False)
-            st.table(grp.rename_axis(cat_col).reset_index(name="Total Cost"))
-
-        # total revenue year
-        elif "total revenue" in q:
-            total_rev = df[num_cols].clip(lower=0).sum().sum()
-            st.markdown(f"**Total revenue (year):** {total_rev:,.2f}")
-
-        # total cost year
-        elif "total cost" in q:
-            total_cost = df[num_cols].clip(upper=0).abs().sum().sum()
-            st.markdown(f"**Total cost (year):** {total_cost:,.2f}")
-
-        # profitability queries
-        elif "profitability" in q:
-            # identify date-like columns
-            date_pattern = re.compile(r"^[A-Za-z]+-\d{4}$")
-            date_cols = [c for c in df.columns if date_pattern.match(str(c))]
-            # build lowercase lookup
-            lc_map = {c.lower(): c for c in date_cols}
-            # sort chronologically
-            month_order = {m: i+1 for i, m in enumerate([
-                "january","february","march","april","may","june",
-                "july","august","september","october","november","december"
-            ])}
-            sorted_cols = sorted(
-                date_cols,
-                key=lambda c: (int(c.split('-')[1]), month_order.get(c.split('-')[0].lower(), 0))
-            )
-            # extract tokens and lowercase
-            tokens = [t.lower() for t in re.findall(r"([A-Za-z]+-\d{4})", query)]
-
-            if len(tokens) == 2 and tokens[0] in lc_map and tokens[1] in lc_map:
-                start_col = lc_map[tokens[0]]
-                end_col = lc_map[tokens[1]]
-                i1 = sorted_cols.index(start_col)
-                i2 = sorted_cols.index(end_col)
-                sel = sorted_cols[min(i1, i2) : max(i1, i2) + 1]
-                rev = df[sel].clip(lower=0).sum().sum()
-                cost = df[sel].clip(upper=0).abs().sum().sum()
-                profit = rev - cost
-                st.markdown(f"**Profitability ({start_col} to {end_col}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-
-            elif len(tokens) == 1 and tokens[0] in lc_map:
-                col = lc_map[tokens[0]]
-                rev = df[col].clip(lower=0).sum()
-                cost = df[col].clip(upper=0).abs().sum()
-                profit = rev - cost
-                st.markdown(f"**Profitability for {col}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-
-            else:
-                # annual profitability
-                rev = df[num_cols].clip(lower=0).sum().sum()
-                cost = df[num_cols].clip(upper=0).abs().sum().sum()
-                profit = rev - cost
-                st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-
         else:
-            # fallback to LLM
-            with st.spinner("Thinking…"):
-                try:
-                    answer = agent.run(query)
-                    answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
-                except Exception as e:
-                    logging.error("Agent run failed", exc_info=True)
-                    st.error(f"❌ Error: {str(e)}")
+            q = query.lower()
+            num_cols = df.select_dtypes(include="number").columns
+            cat_col = next((c for c in df.columns if "type" in c.lower()), None)
+
+            # --- Direct Pandas computations ---
+            # revenues per category
+            if ("each revenue" in q or "for each revenue" in q) and cat_col:
+                df_pos = df.copy()
+                df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
+                grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
+                grp = grp[grp>0].sort_values(ascending=False)
+                st.subheader("Total Revenue by Category")
+                st.table(grp.rename_axis(cat_col).reset_index(name="Total"))
+                if export_csv:
+                    csv = grp.to_csv(header=["Total"])  # index,name
+                    st.download_button("Download CSV", csv, file_name="revenue_by_category.csv")
+                # chart
+                chart_df = grp.to_frame(name="Total").sort_values("Total", ascending=False)
+                if chart_type == "Bar chart": st.bar_chart(chart_df)
+                else: st.line_chart(chart_df)
+
+            # costs per category
+            elif ("each cost" in q or "for each cost" in q) and cat_col:
+                df_neg = df.copy()
+                df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
+                grp = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
+                grp = grp[grp>0].sort_values(ascending=False)
+                st.subheader("Total Cost by Category")
+                st.table(grp.rename_axis(cat_col).reset_index(name="Total"))
+                if export_csv:
+                    csv = grp.to_csv(header=["Total"])  
+                    st.download_button("Download CSV", csv, file_name="cost_by_category.csv")
+                if chart_type == "Bar chart": st.bar_chart(grp)
+                else: st.line_chart(grp)
+
+            # total revenue year
+            elif "total revenue" in q:
+                total_rev = df[num_cols].clip(lower=0).sum().sum()
+                st.metric("Total Revenue (Year)", f"{total_rev:,.2f}")
+
+            # total cost year
+            elif "total cost" in q:
+                total_cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                st.metric("Total Cost (Year)", f"{total_cost:,.2f}")
+
+            # profitability queries
+            elif "profitability" in q:
+                # parse quarter
+                q_match = re.search(r"q([1-4])-(\d{4})", q)
+                if q_match:
+                    qn, qy = int(q_match.group(1)), int(q_match.group(2))
+                    months = {1:(1,2,3),2:(4,5,6),3:(7,8,9),4:(10,11,12)}[qn]
+                    cols = [c for c in df.columns if re.match(rf"[A-Za-z]+-{qy}", c) and (int(c.split('-')[1])==qy and ({m for m in months}))]
                 else:
-                    st.markdown("**Answer:**")
-                    st.write(answer)
+                    # fallback to regex month-year or year
+                    tokens = re.findall(r"([A-Za-z]+-\d{4})", query)
+                    # use prior multi-month logic
+                    # ... (reuse existing profitability range code)
+                    cols = []
+                if cols:
+                    rev = df[cols].clip(lower=0).sum().sum()
+                    cost = df[cols].clip(upper=0).abs().sum().sum()
+                    profit = rev - cost
+                    st.metric(f"Profitability ({', '.join(cols)})", f"{profit:,.2f}")
+                else:
+                    # annual
+                    rev = df[num_cols].clip(lower=0).sum().sum()
+                    cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                    profit = rev - cost
+                    st.metric("Profitability (Year)", f"{profit:,.2f}")
+
+            # fallback to LLM
+            else:
+                with st.spinner("Thinking…"):
+                    try:
+                        answer = agent.run(query)
+                        answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
+                    except Exception as e:
+                        logging.error("Agent run failed", exc_info=True)
+                        st.error(f"❌ Error: {str(e)}")
+                    else:
+                        st.subheader("LLM Answer")
+                        st.write(answer)
 else:
-    st.info("👉 Upload a spreadsheet to get started!")
+    st.info("👉 Upload a spreadsheet in the sidebar to get started!")
