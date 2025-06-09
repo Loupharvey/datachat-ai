@@ -54,7 +54,7 @@ if dsn:
         st.session_state["sentry_tested"] = True
         sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
 
-# 🔑 Load OpenAI key
+# 🔑 Load API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     st.error("🔑 OPENAI_API_KEY not found in secrets or env vars.")
@@ -71,8 +71,8 @@ def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
 @st.cache_resource
 def get_agent(df: pd.DataFrame):
     system_msg = SystemMessage(content=(
-        "You are an expert financial analyst. df has positive values = revenues, negative = costs. "
-        "When asked for aggregates, produce pandas code in ```python and then results & summary."
+        "You are an expert financial data analyst. df has positive values = revenues, negative = costs. "
+        "When asked for aggregates, produce pandas code in ```python``` and then results & summary."
     ))
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
     return create_pandas_dataframe_agent(
@@ -88,21 +88,22 @@ st.title("💬 DataChat AI — Ask Your Spreadsheets")
 uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["csv","xls","xlsx"])
 
 if uploaded_file:
-    file_bytes = uploaded_file.read()
-    df = get_dataframe(file_bytes, uploaded_file.name)
+    # Load and display DataFrame
+    df = get_dataframe(uploaded_file.read(), uploaded_file.name)
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]}×{df.shape[1]}")
     st.dataframe(df.head())
 
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
     if st.button("🤖 Ask DataChat"):
-        if not query.strip(): st.warning("Please enter a question.")
+        if not query.strip():
+            st.warning("Please enter a question.")
         else:
             q = query.lower()
             num_cols = df.select_dtypes(include="number").columns
             cat_col = next((c for c in df.columns if "type" in c.lower()), None)
 
-            # revenue per category
+            # revenues per category
             if ("each revenue" in q or "for each revenue" in q) and cat_col:
                 df_pos = df.copy()
                 df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
@@ -110,7 +111,7 @@ if uploaded_file:
                 grp = grp[grp>0].sort_values(ascending=False)
                 st.table(grp.rename_axis(cat_col).reset_index(name="Total Revenue"))
 
-            # cost per category
+            # costs per category
             elif ("each cost" in q or "for each cost" in q) and cat_col:
                 df_neg = df.copy()
                 df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
@@ -130,46 +131,56 @@ if uploaded_file:
 
             # profitability queries
             elif "profitability" in q:
-                # detect range e.g. march-2023 to may-2023
-                range_match = re.search(
-                    r"(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})\s*(?:to|–|-)\s*(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})",
-                    q
-                )
+                # detect date range e.g. march-2023 to may-2023
                 month_map = {
                     'january':1,'february':2,'march':3,'april':4,'may':5,'june':6,
                     'july':7,'august':8,'september':9,'october':10,'november':11,'december':12
                 }
-                if range_match:
-                    start_m, start_y, end_m, end_y = range_match.groups()
-                    start_num, end_num = month_map[start_m], month_map[end_m]
-                    start_year, end_year = int(start_y), int(end_y)
-                    # collect columns in range
-                    selected = []
+                # range pattern
+                range_pat = r"(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})\s*(?:to|–|-)\s*(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})"
+                m_range = re.search(range_pat, q)
+                if m_range:
+                    s_mon,s_yr,e_mon,e_yr = m_range.groups()
+                    s_val,e_val = month_map[s_mon], month_map[e_mon]
+                    s_yr,e_yr = int(s_yr), int(e_yr)
+                    # select columns
+                    sel = []
                     for c in df.columns:
                         m = re.match(r"([A-Za-z]+)-(\d{4})", c)
                         if m:
-                            mname, myear = m.groups()
-                            mn, yr = month_map.get(mname.lower(),0), int(myear)
-                            if yr>=start_year and yr<=end_year and mn>=start_num and mn<=end_num:
-                                selected.append(c)
-                    if selected:
-                        rev = df[selected].clip(lower=0).sum().sum()
-                        cost = df[selected].clip(upper=0).abs().sum().sum()
+                            mn,yr = month_map[m.group(1).lower()], int(m.group(2))
+                            if (yr> s_yr or (yr==s_yr and mn>=s_val)) and (yr< e_yr or (yr==e_yr and mn<=e_val)):
+                                sel.append(c)
+                    if sel:
+                        rev = df[sel].clip(lower=0).sum().sum()
+                        cost = df[sel].clip(upper=0).abs().sum().sum()
                         profit = rev - cost
-                        cols_str = f"{start_m.title()}-{start_y} to {end_m.title()}-{end_y}"
-                        st.markdown(f"**Profitability for {cols_str}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+                        label = f"{s_mon.title()} {s_yr} to {e_mon.title()} {e_yr}"
+                        st.markdown(f"**Profitability ({label}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
                     else:
                         st.error("No data columns found for that date range.")
                 else:
-                    # single month or annual
-                    month_match = re.search(r"(january|... etc)", q)  # keep original single month logic
-                    # existing single month or annual code here...
-                    rev = df[num_cols].clip(lower=0).sum().sum()
-                    cost = df[num_cols].clip(upper=0).abs().sum().sum()
-                    profit = rev - cost
-                    st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-
+                    # single month pattern
+                    single_pat = r"(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})"
+                    m1 = re.search(single_pat, q)
+                    if m1:
+                        mon,yr = m1.groups()
+                        key = f"{mon.capitalize()}-{yr}"
+                        if key in df.columns:
+                            rev = df[key].clip(lower=0).sum()
+                            cost = df[key].clip(upper=0).abs().sum()
+                            profit = rev - cost
+                            st.markdown(f"**Profitability for {key}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+                        else:
+                            st.error(f"Column '{key}' not found.")
+                    else:
+                        # annual
+                        rev = df[num_cols].clip(lower=0).sum().sum()
+                        cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                        profit = rev - cost
+                        st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
             else:
+                # fallback to LLM
                 with st.spinner("Thinking…"):
                     try:
                         answer = agent.run(query)
