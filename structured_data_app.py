@@ -46,7 +46,7 @@ if st.secrets.get("SENTRY_DSN"):
     import sentry_sdk
     from sentry_sdk.integrations.logging import LoggingIntegration
     sentry_sdk.init(
-        dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
+        dsn=st.secrets["SENTRY_DSN"],
         integrations=[LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)],
         traces_sample_rate=0.1,
         send_default_pii=True,
@@ -101,6 +101,7 @@ if uploaded_file:
         q = query.lower().strip()
         if not q:
             st.warning("Please enter a question.")
+            st.stop()
         num_cols = df.select_dtypes(include="number").columns
         cat_col = next((c for c in df.columns if "type" in c.lower()), None)
 
@@ -118,8 +119,8 @@ if uploaded_file:
             else:
                 st.line_chart(rev_month)
 
-        # --- Revenue by Category ---
-        elif ("each revenue" in q or "revenue by category" in q) and cat_col:
+        # --- Category breakdown ---
+        elif ("each revenue" in q and cat_col):
             df_pos = df.copy()
             df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
             grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
@@ -128,7 +129,7 @@ if uploaded_file:
             st.table(grp.rename_axis(cat_col).reset_index(name="Total"))
             if export_csv:
                 st.download_button("Download CSV", grp.to_csv(header=["Total"]), "revenue_by_category.csv")
-            # chart
+            # bar/line
             if chart_type == "Bar chart": st.bar_chart(grp)
             else: st.line_chart(grp)
             # pie
@@ -140,8 +141,7 @@ if uploaded_file:
             else:
                 st.warning("Install matplotlib to see pie chart breakdown.")
 
-        # --- Cost by Category ---
-        elif ("each cost" in q or "cost by category" in q) and cat_col:
+        elif ("each cost" in q and cat_col):
             df_neg = df.copy()
             df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
             grp = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
@@ -159,6 +159,43 @@ if uploaded_file:
                 st.pyplot(fig)
             else:
                 st.warning("Install matplotlib to see pie chart breakdown.")
+
+        # --- Downloadable report ---
+        elif "download report" in q or "export report" in q:
+            # generate a simple CSV of full df
+            csv = df.to_csv(index=False)
+            st.download_button("Download full dataset as CSV", csv, "report.csv")
+
+        # --- Quarter parsing ---
+        elif re.search(r"q[1-4]-\d{4}", q):
+            sm = re.search(r"q([1-4])-(\d{4})", q)
+            qn, qy = int(sm.group(1)), int(sm.group(2))
+            months = {1:(1,2,3),2:(4,5,6),3:(7,8,9),4:(10,11,12)}[qn]
+            date_cols = [c for c in df.columns if re.match(rf"[A-Za-z]+-{qy}$", str(c))]
+            sel = []
+            for c in date_cols:
+                mname, year = c.split('-')
+                if int(year)==qy and (datetime.datetime.strptime(mname, "%B").month in months): sel.append(c)
+            if sel:
+                rev = df[sel].clip(lower=0).sum().sum()
+                cost = df[sel].clip(upper=0).abs().sum().sum()
+                profit = rev - cost
+                st.metric(f"Profitability Q{qn}-{qy}", f"{profit:,.2f}")
+            else:
+                st.error("No data found for that quarter.")
+
+        # --- Rolling window ---
+        elif m := re.search(r"last\s+(\d+)\s+months", q):
+            n = int(m.group(1))
+            # select most recent n date-like cols
+            date_cols = [c for c in df.columns if re.match(r"[A-Za-z]+-\d{4}$", str(c))]
+            month_order = {m:i+1 for i,m in enumerate(["January","February","March","April","May","June","July","August","September","October","November","December"]) }
+            sorted_cols = sorted(date_cols, key=lambda c:(int(c.split('-')[1]), month_order.get(c.split('-')[0],0)))
+            sel = sorted_cols[-n:]
+            rev = df[sel].clip(lower=0).sum().sum()
+            cost = df[sel].clip(upper=0).abs().sum().sum()
+            profit = rev - cost
+            st.metric(f"Profitability last {n} months", f"{profit:,.2f}")
 
         # ... other direct computations unchanged ...
         else:
