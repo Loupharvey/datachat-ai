@@ -98,93 +98,92 @@ if uploaded_file:
     if st.button("🤖 Ask DataChat"):
         if not query.strip():
             st.warning("Please enter a question.")
-        else:
-            q = query.lower()
-            num_cols = df.select_dtypes(include="number").columns
-            cat_col = next((c for c in df.columns if "type" in c.lower()), None)
+            st.stop()
+        q = query.lower()
+        num_cols = df.select_dtypes(include="number").columns
+        cat_col = next((c for c in df.columns if "type" in c.lower()), None)
 
-            # revenues per category
-            if ("each revenue" in q or "for each revenue" in q) and cat_col:
-                df_pos = df.copy()
-                df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
-                grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
-                grp = grp[grp > 0].sort_values(ascending=False)
-                st.table(grp.rename_axis(cat_col).reset_index(name="Total Revenue"))
+        # revenues per category
+        if ("each revenue" in q or "for each revenue" in q) and cat_col:
+            df_pos = df.copy()
+            df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
+            grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
+            grp = grp[grp > 0].sort_values(ascending=False)
+            st.table(grp.rename_axis(cat_col).reset_index(name="Total Revenue"))
 
-            # costs per category
-            elif ("each cost" in q or "for each cost" in q) and cat_col:
-                df_neg = df.copy()
-                df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
-                grp = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
-                grp = grp[grp > 0].sort_values(ascending=False)
-                st.table(grp.rename_axis(cat_col).reset_index(name="Total Cost"))
+        # costs per category
+        elif ("each cost" in q or "for each cost" in q) and cat_col:
+            df_neg = df.copy()
+            df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
+            grp = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
+            grp = grp[grp > 0].sort_values(ascending=False)
+            st.table(grp.rename_axis(cat_col).reset_index(name="Total Cost"))
 
-            # total revenue year
-            elif "total revenue" in q:
-                total_rev = df[num_cols].clip(lower=0).sum().sum()
-                st.markdown(f"**Total revenue (year):** {total_rev:,.2f}")
+        # total revenue year
+        elif "total revenue" in q:
+            total_rev = df[num_cols].clip(lower=0).sum().sum()
+            st.markdown(f"**Total revenue (year):** {total_rev:,.2f}")
 
-            # total cost year
-            elif "total cost" in q:
-                total_cost = df[num_cols].clip(upper=0).abs().sum().sum()
-                st.markdown(f"**Total cost (year):** {total_cost:,.2f}")
+        # total cost year
+        elif "total cost" in q:
+            total_cost = df[num_cols].clip(upper=0).abs().sum().sum()
+            st.markdown(f"**Total cost (year):** {total_cost:,.2f}")
 
-            # profitability queries
-            elif "profitability" in q:
-                # identify date columns safely
-                date_pattern = re.compile(r"^[A-Za-z]+-\d{4}$")
-                date_cols = [c for c in df.columns if date_pattern.match(str(c))]
-                # sort chronologically
-                month_map = {m: i+1 for i, m in enumerate([
-                    "january","february","march","april","may","june",
-                    "july","august","september","october","november","december"
-                ])}
-                date_cols_sorted = sorted(
-                    date_cols,
-                    key=lambda c: (int(c.split('-')[1]), month_map.get(c.split('-')[0].lower(), 0))
-                )
-                # extract tokens
-                tokens = re.findall(r"([A-Za-z]+-\d{4})", q)
+        # profitability queries
+        elif "profitability" in q:
+            # identify date-like columns
+            date_pattern = re.compile(r"^[A-Za-z]+-\d{4}$")
+            date_cols = [c for c in df.columns if date_pattern.match(str(c))]
+            # build lowercase lookup
+            lc_map = {c.lower(): c for c in date_cols}
+            # sort chronologically
+            month_order = {m: i+1 for i, m in enumerate([
+                "january","february","march","april","may","june",
+                "july","august","september","october","november","december"
+            ])}
+            sorted_cols = sorted(
+                date_cols,
+                key=lambda c: (int(c.split('-')[1]), month_order.get(c.split('-')[0].lower(), 0))
+            )
+            # extract tokens and lowercase
+            tokens = [t.lower() for t in re.findall(r"([A-Za-z]+-\d{4})", query)]
 
-                if len(tokens) == 2:
-                    start, end = tokens
-                    if start in date_cols_sorted and end in date_cols_sorted:
-                        i1, i2 = date_cols_sorted.index(start), date_cols_sorted.index(end)
-                        sel = date_cols_sorted[min(i1, i2): max(i1, i2) + 1]
-                    else:
-                        sel = []
-                    if not sel:
-                        st.error("No data columns found for that date range.")
-                    else:
-                        rev = df[sel].clip(lower=0).sum().sum()
-                        cost = df[sel].clip(upper=0).abs().sum().sum()
-                        profit = rev - cost
-                        st.markdown(f"**Profitability ({start} to {end}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-                elif len(tokens) == 1:
-                    key = tokens[0]
-                    if key in date_cols:
-                        rev = df[key].clip(lower=0).sum()
-                        cost = df[key].clip(upper=0).abs().sum()
-                        profit = rev - cost
-                        st.markdown(f"**Profitability for {key}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-                    else:
-                        st.error(f"Column '{key}' not found.")
-                else:
-                    rev = df[num_cols].clip(lower=0).sum().sum()
-                    cost = df[num_cols].clip(upper=0).abs().sum().sum()
-                    profit = rev - cost
-                    st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+            if len(tokens) == 2 and tokens[0] in lc_map and tokens[1] in lc_map:
+                start_col = lc_map[tokens[0]]
+                end_col = lc_map[tokens[1]]
+                i1 = sorted_cols.index(start_col)
+                i2 = sorted_cols.index(end_col)
+                sel = sorted_cols[min(i1, i2) : max(i1, i2) + 1]
+                rev = df[sel].clip(lower=0).sum().sum()
+                cost = df[sel].clip(upper=0).abs().sum().sum()
+                profit = rev - cost
+                st.markdown(f"**Profitability ({start_col} to {end_col}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+
+            elif len(tokens) == 1 and tokens[0] in lc_map:
+                col = lc_map[tokens[0]]
+                rev = df[col].clip(lower=0).sum()
+                cost = df[col].clip(upper=0).abs().sum()
+                profit = rev - cost
+                st.markdown(f"**Profitability for {col}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+
             else:
-                # fallback to LLM
-                with st.spinner("Thinking…"):
-                    try:
-                        answer = agent.run(query)
-                        answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
-                    except Exception as e:
-                        logging.error("Agent run failed", exc_info=True)
-                        st.error(f"❌ Error: {str(e)}")
-                    else:
-                        st.markdown("**Answer:**")
-                        st.write(answer)
+                # annual profitability
+                rev = df[num_cols].clip(lower=0).sum().sum()
+                cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                profit = rev - cost
+                st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+
+        else:
+            # fallback to LLM
+            with st.spinner("Thinking…"):
+                try:
+                    answer = agent.run(query)
+                    answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
+                except Exception as e:
+                    logging.error("Agent run failed", exc_info=True)
+                    st.error(f"❌ Error: {str(e)}")
+                else:
+                    st.markdown("**Answer:**")
+                    st.write(answer)
 else:
     st.info("👉 Upload a spreadsheet to get started!")
