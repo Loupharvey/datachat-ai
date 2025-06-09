@@ -17,7 +17,7 @@ except ImportError:
         from langchain.chat_models import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
 
-# 📋 Page configuration (must come first)
+# 📋 Page configuration (must be first Streamlit command)
 st.set_page_config(
     page_title="📊 DataChat AI",
     layout="centered",
@@ -49,7 +49,7 @@ if dsn:
         event_level=logging.ERROR,
     )
     sentry_sdk.init(
-        dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
+        dsn=dsn,
         integrations=[logging_integration],
         traces_sample_rate=0.1,
         send_default_pii=True,
@@ -78,14 +78,14 @@ def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
 @st.cache_resource
 def get_agent(df: pd.DataFrame):
-    # System prompt: act as expert data analyst
+    # System prompt: expert financial analyst
     system_msg = SystemMessage(content=(
-    "You are an expert data analyst and data engineer. You have full access to the pandas DataFrame named 'df'. "
-    "For every question, generate a valid Python code snippet enclosed in ```python that uses pandas "
-    "(e.g., df.groupby, df.sum, df.mean) to perform the requested computations. "
-    "After the code snippet, provide the concise numeric results and a brief plain-English summary. "
-    "Ensure the code runs without errors and only references the DataFrame 'df'."
-))
+        "You are an expert financial data analyst and data engineer. "
+        "The DataFrame 'df' contains numeric values where positive values represent revenues and negative values represent costs. "
+        "Profitability is revenue minus cost (i.e., sum of all values). "
+        "When given a question, generate a Python code snippet in ```python that uses pandas to compute exactly what is asked (e.g., total revenues for 2023, total costs for 2023, profitability for March 2023). "
+        "After the code, output the numeric results and a concise summary in plain English."
+    ))
     # Use GPT-4 with deterministic output
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
     return create_pandas_dataframe_agent(
