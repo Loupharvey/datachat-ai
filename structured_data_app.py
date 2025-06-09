@@ -80,10 +80,12 @@ def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
 def get_agent(df: pd.DataFrame):
     # System prompt: act as expert data analyst
     system_msg = SystemMessage(content=(
-        "You are an expert data analyst. Given the DataFrame, provide clear, concise insights, "
-        "and if necessary, generate Python/pandas code to compute your answers. "
-        "Start with a brief summary of the data before answering the user's question."
-    ))
+    "You are an expert data analyst and data engineer. You have full access to the pandas DataFrame named 'df'. "
+    "For every question, generate a valid Python code snippet enclosed in ```python that uses pandas "
+    "(e.g., df.groupby, df.sum, df.mean) to perform the requested computations. "
+    "After the code snippet, provide the concise numeric results and a brief plain-English summary. "
+    "Ensure the code runs without errors and only references the DataFrame 'df'."
+))
     # Use GPT-4 with deterministic output
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
     return create_pandas_dataframe_agent(
