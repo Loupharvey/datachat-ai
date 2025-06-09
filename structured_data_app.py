@@ -44,8 +44,7 @@ if dsn:
     import sentry_sdk
     from sentry_sdk.integrations.logging import LoggingIntegration
     logging_integration = LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)
-    sentry_sdk.init(dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136"
-                    , integrations=[logging_integration], traces_sample_rate=0.1, send_default_pii=True)
+    sentry_sdk.init(dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136", integrations=[logging_integration], traces_sample_rate=0.1, send_default_pii=True)
     logger = logging.getLogger(__name__)
     logger.info("Sentry initialized")
     if not st.session_state.get("sentry_tested"):
@@ -85,13 +84,16 @@ st.title("💬 DataChat AI — Ask Your Spreadsheets")
 uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["xlsx", "xls", "csv"] )
 
 if uploaded_file:
+    # Load and display DataFrame
     file_bytes = uploaded_file.read()
     df = get_dataframe(file_bytes, uploaded_file.name)
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]}×{df.shape[1]}")
     st.dataframe(df.head())
 
+    # Prepare agent and user query
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
+
     if st.button("🤖 Ask DataChat"):
         if not query.strip():
             st.warning("Please enter a question.")
@@ -100,21 +102,20 @@ if uploaded_file:
             # identify numeric columns and category column
             num_cols = df.select_dtypes(include="number").columns
             cat_col = next((c for c in df.columns if "type" in c.lower()), None)
+
             # direct computation for common requests
-            if "each revenue" in q or "for each revenue" in q:
-                if cat_col:
-                    rev = df[df[num_cols] >= 0]
-                    grouped = rev.groupby(cat_col)[num_cols].sum().sum(axis=1)
-                    st.table(grouped.rename_axis(cat_col).reset_index(name="Total Revenue"))
-                else:
-                    st.error("No category column found for grouping revenues.")
-            elif "each cost" in q or "for each cost" in q:
-                if cat_col:
-                    cost = df[df[num_cols] < 0]
-                    grouped = cost.groupby(cat_col)[num_cols].sum().abs().sum(axis=1)
-                    st.table(grouped.rename_axis(cat_col).reset_index(name="Total Cost"))
-                else:
-                    st.error("No category column found for grouping costs.")
+            if ("each revenue" in q or "for each revenue" in q) and cat_col:
+                # sum positives per category across all numeric columns
+                df_pos = df.copy()
+                df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
+                grouped = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
+                st.table(grouped.rename_axis(cat_col).reset_index(name="Total Revenue"))
+            elif ("each cost" in q or "for each cost" in q) and cat_col:
+                # sum absolute negatives per category
+                df_neg = df.copy()
+                df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
+                grouped = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
+                st.table(grouped.rename_axis(cat_col).reset_index(name="Total Cost"))
             elif "total revenue" in q:
                 total_rev = df[num_cols].clip(lower=0).sum().sum()
                 st.markdown(f"**Total revenue:** {total_rev:,.2f}")
