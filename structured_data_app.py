@@ -76,7 +76,7 @@ def get_agent(df: pd.DataFrame):
 
 # 🖥️ App UI
 st.title("💬 DataChat AI — Ask Your Spreadsheets")
-uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["csv","xls","xlsx"] )
+uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["csv","xls","xlsx"])
 
 # Chart & export controls
 chart_type = st.sidebar.selectbox("📈 Chart type (after query)", ["Line chart", "Bar chart"])
@@ -87,7 +87,6 @@ if uploaded_file:
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
     st.dataframe(df.head())
 
-    # Prepare agent
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
 
@@ -100,8 +99,24 @@ if uploaded_file:
             cat_col = next((c for c in df.columns if "type" in c.lower()), None)
 
             # --- Direct Pandas computations ---
+            # revenue by month
+            if ("each month" in q or "by each month" in q) and "revenue" in q:
+                rev_by_month = df[num_cols].clip(lower=0).sum()
+                rev_by_month = rev_by_month[rev_by_month > 0]
+                st.subheader("Total Revenue by Month")
+                table = rev_by_month.rename_axis("Month").reset_index(name="Total")
+                st.table(table)
+                if export_csv:
+                    csv = table.to_csv(index=False)
+                    st.download_button("Download CSV", csv, file_name="revenue_by_month.csv")
+                chart_df = rev_by_month.to_frame(name="Total")
+                if chart_type == "Bar chart":
+                    st.bar_chart(chart_df)
+                else:
+                    st.line_chart(chart_df)
+
             # revenues per category
-            if ("each revenue" in q or "for each revenue" in q) and cat_col:
+            elif ("each revenue" in q or "for each revenue" in q) and cat_col:
                 df_pos = df.copy()
                 df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
                 grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
@@ -109,9 +124,8 @@ if uploaded_file:
                 st.subheader("Total Revenue by Category")
                 st.table(grp.rename_axis(cat_col).reset_index(name="Total"))
                 if export_csv:
-                    csv = grp.to_csv(header=["Total"])  # index,name
+                    csv = grp.to_csv(header=["Total"])
                     st.download_button("Download CSV", csv, file_name="revenue_by_category.csv")
-                # chart
                 chart_df = grp.to_frame(name="Total").sort_values("Total", ascending=False)
                 if chart_type == "Bar chart": st.bar_chart(chart_df)
                 else: st.line_chart(chart_df)
@@ -125,10 +139,11 @@ if uploaded_file:
                 st.subheader("Total Cost by Category")
                 st.table(grp.rename_axis(cat_col).reset_index(name="Total"))
                 if export_csv:
-                    csv = grp.to_csv(header=["Total"])  
+                    csv = grp.to_csv(header=["Total"])
                     st.download_button("Download CSV", csv, file_name="cost_by_category.csv")
-                if chart_type == "Bar chart": st.bar_chart(grp)
-                else: st.line_chart(grp)
+                chart_df = grp.to_frame(name="Total")
+                if chart_type == "Bar chart": st.bar_chart(chart_df)
+                else: st.line_chart(chart_df)
 
             # total revenue year
             elif "total revenue" in q:
@@ -147,20 +162,30 @@ if uploaded_file:
                 if q_match:
                     qn, qy = int(q_match.group(1)), int(q_match.group(2))
                     months = {1:(1,2,3),2:(4,5,6),3:(7,8,9),4:(10,11,12)}[qn]
-                    cols = [c for c in df.columns if re.match(rf"[A-Za-z]+-{qy}", c) and (int(c.split('-')[1])==qy and ({m for m in months}))]
+                    date_cols = [c for c in df.columns if re.match(rf"[A-Za-z]+-{qy}", c)]
+                    sel = [c for c in date_cols if int(c.split('-')[1])==qy and int(c.split('-')[0].lower().translate(str.maketrans({m:str(i+1) for i,m in enumerate(["january","february","march","april","may","june","july","august","september","october","november","december"])}))) in months]
                 else:
-                    # fallback to regex month-year or year
-                    tokens = re.findall(r"([A-Za-z]+-\d{4})", query)
-                    # use prior multi-month logic
-                    # ... (reuse existing profitability range code)
-                    cols = []
-                if cols:
-                    rev = df[cols].clip(lower=0).sum().sum()
-                    cost = df[cols].clip(upper=0).abs().sum().sum()
+                    # fallback to regex month-year
+                    tokens = re.findall(r"([A-Za-z]+-\d{4})", q)
+                    sel = []
+                    if len(tokens)==2:
+                        # reuse multi-month slicing logic
+                        # (similar to revenue_by_month selection)
+                        pattern = re.compile(r"^[A-Za-z]+-\d{4}$")
+                        date_cols = [c for c in df.columns if pattern.match(str(c))]
+                        month_map = {m:i+1 for i,m in enumerate(["january","february","march","april","may","june","july","august","september","october","november","december"])}
+                        sorted_cols = sorted(date_cols, key=lambda c:(int(c.split('-')[1]), month_map.get(c.split('-')[0].lower(),0)))
+                        start, end = tokens[0].lower(), tokens[1].lower()
+                        lc_map = {c.lower():c for c in sorted_cols}
+                        if start in lc_map and end in lc_map:
+                            i1, i2 = sorted_cols.index(lc_map[start]), sorted_cols.index(lc_map[end])
+                            sel = sorted_cols[min(i1,i2):max(i1,i2)+1]
+                if sel:
+                    rev = df[sel].clip(lower=0).sum().sum()
+                    cost = df[sel].clip(upper=0).abs().sum().sum()
                     profit = rev - cost
-                    st.metric(f"Profitability ({', '.join(cols)})", f"{profit:,.2f}")
+                    st.metric(f"Profitability ({', '.join(sel)})", f"{profit:,.2f}")
                 else:
-                    # annual
                     rev = df[num_cols].clip(lower=0).sum().sum()
                     cost = df[num_cols].clip(upper=0).abs().sum().sum()
                     profit = rev - cost
@@ -179,4 +204,4 @@ if uploaded_file:
                         st.subheader("LLM Answer")
                         st.write(answer)
 else:
-    st.info("👉 Upload a spreadsheet in the sidebar to get started!")
+    st.info("👉 Upload a spreadsheet to get started!")
