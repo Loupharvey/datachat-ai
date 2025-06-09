@@ -88,7 +88,6 @@ st.title("💬 DataChat AI — Ask Your Spreadsheets")
 uploaded_file = st.sidebar.file_uploader("📂 Upload Excel or CSV", type=["csv","xls","xlsx"])
 
 if uploaded_file:
-    # Load and display DataFrame
     df = get_dataframe(uploaded_file.read(), uploaded_file.name)
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]}×{df.shape[1]}")
     st.dataframe(df.head())
@@ -109,7 +108,7 @@ if uploaded_file:
                 df_pos = df.copy()
                 df_pos[num_cols] = df_pos[num_cols].clip(lower=0)
                 grp = df_pos.groupby(cat_col)[num_cols].sum().sum(axis=1)
-                grp = grp[grp>0].sort_values(ascending=False)
+                grp = grp[grp > 0].sort_values(ascending=False)
                 st.table(grp.rename_axis(cat_col).reset_index(name="Total Revenue"))
 
             # costs per category
@@ -117,7 +116,7 @@ if uploaded_file:
                 df_neg = df.copy()
                 df_neg[num_cols] = df_neg[num_cols].clip(upper=0).abs()
                 grp = df_neg.groupby(cat_col)[num_cols].sum().sum(axis=1)
-                grp = grp[grp>0].sort_values(ascending=False)
+                grp = grp[grp > 0].sort_values(ascending=False)
                 st.table(grp.rename_axis(cat_col).reset_index(name="Total Cost"))
 
             # total revenue year
@@ -132,24 +131,24 @@ if uploaded_file:
 
             # profitability queries
             elif "profitability" in q:
-                # extract all month-year tokens
+                # compile pattern for date columns
+                date_pattern = re.compile(r"^[A-Za-z]+-\d{4}$")
+                # extract tokens in query
                 tokens = re.findall(r"([A-Za-z]+-\d{4})", q)
-                # find date columns
-                date_cols = [c for c in df.columns if re.match(r"[A-Za-z]+-\d{4}", c)]
-                # map month names
-                month_map = { m:i+1 for i,m in enumerate(["january","february","march","april","may","june","july","august","september","october","november","december"]) }
-                # helper to sort cols
-                def col_key(c):
-                    m,y = c.split('-')
-                    return (int(y), month_map.get(m.lower(), 0))
-                date_cols_sorted = sorted(date_cols, key=col_key)
-
+                # find matching columns
+                date_cols = [c for c in df.columns if date_pattern.match(c)]
+                # sort chronologically
+                month_map = {m: i+1 for i, m in enumerate(["january","february","march","april","may","june","july","august","september","october","november","december"])}
+                date_cols_sorted = sorted(
+                    date_cols,
+                    key=lambda c: (int(c.split('-')[1]), month_map.get(c.split('-')[0].lower(), 0))
+                )
+                # multi-month range
                 if len(tokens) == 2:
-                    start_token, end_token = tokens
-                    if start_token in date_cols_sorted and end_token in date_cols_sorted:
-                        i1 = date_cols_sorted.index(start_token)
-                        i2 = date_cols_sorted.index(end_token)
-                        sel = date_cols_sorted[min(i1,i2):max(i1,i2)+1]
+                    start, end = tokens
+                    if start in date_cols_sorted and end in date_cols_sorted:
+                        i1, i2 = date_cols_sorted.index(start), date_cols_sorted.index(end)
+                        sel = date_cols_sorted[min(i1, i2): max(i1, i2) + 1]
                     else:
                         sel = []
                     if not sel:
@@ -158,25 +157,23 @@ if uploaded_file:
                         rev = df[sel].clip(lower=0).sum().sum()
                         cost = df[sel].clip(upper=0).abs().sum().sum()
                         profit = rev - cost
-                        label = f"{start_token} to {end_token}"
-                        st.markdown(f"**Profitability ({label}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-
+                        st.markdown(f"**Profitability ({start} to {end}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+                # single month
                 elif len(tokens) == 1:
                     key = tokens[0]
-                    if key in df.columns:
+                    if key in date_cols:
                         rev = df[key].clip(lower=0).sum()
                         cost = df[key].clip(upper=0).abs().sum()
                         profit = rev - cost
                         st.markdown(f"**Profitability for {key}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
                     else:
-                        st.error(f"Column '{key}' not found.")
-
+                        st.error(f"Column '{tokens[0]}' not found.")
+                # annual
                 else:
                     rev = df[num_cols].clip(lower=0).sum().sum()
                     cost = df[num_cols].clip(upper=0).abs().sum().sum()
                     profit = rev - cost
                     st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-
             else:
                 # fallback to LLM
                 with st.spinner("Thinking…"):
