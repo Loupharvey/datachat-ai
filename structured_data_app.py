@@ -49,7 +49,7 @@ if dsn:
         event_level=logging.ERROR,
     )
     sentry_sdk.init(
-        dsn=dsn,
+        dsn="https://706656d5eb7a8fe73aecc1ecfad78a61@o4509464691015680.ingest.us.sentry.io/4509464705499136",
         integrations=[logging_integration],
         traces_sample_rate=0.1,
         send_default_pii=True,
@@ -61,27 +61,6 @@ if dsn:
     if not st.session_state.get("sentry_tested"):
         st.session_state["sentry_tested"] = True
         sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
-
-# 🤖 Configure the DataFrame agent with a robust financial prompt
-def get_agent(df: pd.DataFrame):
-    system_msg = SystemMessage(content=(
-        "You are an expert financial data analyst and data engineer. The DataFrame 'df' contains numeric values where positive numbers represent revenues and negative numbers represent costs. "
-        "When asked for total revenue, sum all positive values. "
-        "When asked for total cost, sum the absolute value of all negative numbers. "
-        "When asked for profitability for a period, compute (sum of positive values) minus (sum of absolute negative values). "
-        "Generate a full Python code snippet in ```python that uses pandas on 'df' (e.g., df[df>0].sum().sum() and df[df<0].abs().sum().sum()) to compute the requested metric. "
-        "After the code, provide the exact numeric results and a concise plain-English summary."
-    ))
-    # Use GPT-4 with deterministic output
-    llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
-    return create_pandas_dataframe_agent(
-        llm,
-        df,
-        verbose=False,
-        allow_dangerous_code=True,
-        handle_parsing_errors=True,
-        prefix_messages=[system_msg],
-    )
 
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -101,13 +80,13 @@ def get_dataframe(file_bytes: bytes, filename: str) -> pd.DataFrame:
 def get_agent(df: pd.DataFrame):
     # System prompt: expert financial analyst
     system_msg = SystemMessage(content=(
-        "You are an expert financial data analyst and data engineer. "
-        "The DataFrame 'df' contains numeric values where positive values represent revenues and negative values represent costs. "
-        "Profitability is revenue minus cost (i.e., sum of all values). "
-        "When given a question, generate a Python code snippet in ```python that uses pandas to compute exactly what is asked (e.g., total revenues for 2023, total costs for 2023, profitability for March 2023). "
-        "After the code, output the numeric results and a concise summary in plain English."
+        "You are an expert financial data analyst and data engineer. The DataFrame 'df' contains numeric values where positive numbers represent revenues and negative numbers represent costs. "
+        "When asked for total revenue, sum all positive values. "
+        "When asked for total cost, sum the absolute value of all negative numbers. "
+        "When asked for profitability for a period, compute (sum of positive values) minus (sum of absolute negative values). "
+        "Generate a full Python code snippet in ```python that uses pandas on 'df' (e.g., df[df>0].sum().sum() and df[df<0].abs().sum().sum()) to compute the requested metric. "
+        "After the code, provide the exact numeric results and a concise plain-English summary."
     ))
-    # Use GPT-4 with deterministic output
     llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
     return create_pandas_dataframe_agent(
         llm,
@@ -127,27 +106,47 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file:
+    # Load and display DataFrame
     file_bytes = uploaded_file.read()
     df = get_dataframe(file_bytes, uploaded_file.name)
     st.success(f"Loaded `{uploaded_file.name}` — {df.shape[0]} rows × {df.shape[1]} cols")
     st.dataframe(df.head())
 
+    # Prepare agent and user query
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
+
     if st.button("🤖 Ask DataChat"):
         if not query.strip():
             st.warning("Please enter a question.")
         else:
-            with st.spinner("Thinking…"):
-                try:
-                    answer = agent.run(query)
-                    # Fix runs-together sentences by ensuring a space after periods
-                    answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
-                except Exception as e:
-                    logging.error("Agent run failed", exc_info=True)
-                    st.error(f"❌ Error: {str(e)}")
-                else:
-                    st.markdown("**Answer:**")
-                    st.write(answer)
+            q = query.lower()
+            num_cols = df.select_dtypes(include="number").columns
+
+            # Handle revenues, costs, and profitability directly
+            if "total revenue" in q:
+                total_rev = df[num_cols].clip(lower=0).sum().sum()
+                st.markdown(f"**Total revenue:** {total_rev:,.2f}")
+            elif "total cost" in q:
+                total_cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                st.markdown(f"**Total cost:** {total_cost:,.2f}")
+            elif "profitability" in q:
+                rev = df[num_cols].clip(lower=0).sum().sum()
+                cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                profit = rev - cost
+                st.markdown(f"**Profitability:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+            else:
+                # Fall back to LLM for other queries
+                with st.spinner("Thinking…"):
+                    try:
+                        answer = agent.run(query)
+                        # Fix runs-together sentences by ensuring a space after periods
+                        answer = re.sub(r"\.([A-Za-z])", r". \1", answer)
+                    except Exception as e:
+                        logging.error("Agent run failed", exc_info=True)
+                        st.error(f"❌ Error: {str(e)}")
+                    else:
+                        st.markdown("**Answer:**")
+                        st.write(answer)
 else:
     st.info("👉 Upload a spreadsheet in the sidebar to get started!")
