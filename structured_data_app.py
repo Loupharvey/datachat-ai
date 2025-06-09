@@ -131,19 +131,21 @@ if uploaded_file:
 
             # profitability queries
             elif "profitability" in q:
-                # compile pattern for date columns
+                # identify date columns safely
                 date_pattern = re.compile(r"^[A-Za-z]+-\d{4}$")
-                # extract tokens in query
-                tokens = re.findall(r"([A-Za-z]+-\d{4})", q)
-                # find matching columns
-                date_cols = [c for c in df.columns if date_pattern.match(c)]
+                date_cols = [c for c in df.columns if date_pattern.match(str(c))]
                 # sort chronologically
-                month_map = {m: i+1 for i, m in enumerate(["january","february","march","april","may","june","july","august","september","october","november","december"])}
+                month_map = {m: i+1 for i, m in enumerate([
+                    "january","february","march","april","may","june",
+                    "july","august","september","october","november","december"
+                ])}
                 date_cols_sorted = sorted(
                     date_cols,
                     key=lambda c: (int(c.split('-')[1]), month_map.get(c.split('-')[0].lower(), 0))
                 )
-                # multi-month range
+                # extract tokens
+                tokens = re.findall(r"([A-Za-z]+-\d{4})", q)
+
                 if len(tokens) == 2:
                     start, end = tokens
                     if start in date_cols_sorted and end in date_cols_sorted:
@@ -158,7 +160,6 @@ if uploaded_file:
                         cost = df[sel].clip(upper=0).abs().sum().sum()
                         profit = rev - cost
                         st.markdown(f"**Profitability ({start} to {end}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-                # single month
                 elif len(tokens) == 1:
                     key = tokens[0]
                     if key in date_cols:
@@ -167,8 +168,7 @@ if uploaded_file:
                         profit = rev - cost
                         st.markdown(f"**Profitability for {key}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
                     else:
-                        st.error(f"Column '{tokens[0]}' not found.")
-                # annual
+                        st.error(f"Column '{key}' not found.")
                 else:
                     rev = df[num_cols].clip(lower=0).sum().sum()
                     cost = df[num_cols].clip(upper=0).abs().sum().sum()
