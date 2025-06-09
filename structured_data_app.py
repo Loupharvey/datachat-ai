@@ -62,6 +62,27 @@ if dsn:
         st.session_state["sentry_tested"] = True
         sentry_sdk.capture_message("Initial Sentry test event from DataChat AI app")
 
+# 🤖 Configure the DataFrame agent with a robust financial prompt
+def get_agent(df: pd.DataFrame):
+    system_msg = SystemMessage(content=(
+        "You are an expert financial data analyst and data engineer. The DataFrame 'df' contains numeric values where positive numbers represent revenues and negative numbers represent costs. "
+        "When asked for total revenue, sum all positive values. "
+        "When asked for total cost, sum the absolute value of all negative numbers. "
+        "When asked for profitability for a period, compute (sum of positive values) minus (sum of absolute negative values). "
+        "Generate a full Python code snippet in ```python that uses pandas on 'df' (e.g., df[df>0].sum().sum() and df[df<0].abs().sum().sum()) to compute the requested metric. "
+        "After the code, provide the exact numeric results and a concise plain-English summary."
+    ))
+    # Use GPT-4 with deterministic output
+    llm = ChatOpenAI(api_key=OPENAI_API_KEY, model="gpt-4", temperature=0.0)
+    return create_pandas_dataframe_agent(
+        llm,
+        df,
+        verbose=False,
+        allow_dangerous_code=True,
+        handle_parsing_errors=True,
+        prefix_messages=[system_msg],
+    )
+
 # 🔑 Load OpenAI API key
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
