@@ -95,6 +95,7 @@ if uploaded_file:
 
     agent = get_agent(df)
     query = st.text_input("Ask a question about your data:")
+
     if st.button("🤖 Ask DataChat"):
         if not query.strip():
             st.warning("Please enter a question.")
@@ -131,54 +132,51 @@ if uploaded_file:
 
             # profitability queries
             elif "profitability" in q:
-                # detect date range e.g. march-2023 to may-2023
-                month_map = {
-                    'january':1,'february':2,'march':3,'april':4,'may':5,'june':6,
-                    'july':7,'august':8,'september':9,'october':10,'november':11,'december':12
-                }
-                # range pattern
-                range_pat = r"(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})\s*(?:to|–|-)\s*(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})"
-                m_range = re.search(range_pat, q)
-                if m_range:
-                    s_mon,s_yr,e_mon,e_yr = m_range.groups()
-                    s_val,e_val = month_map[s_mon], month_map[e_mon]
-                    s_yr,e_yr = int(s_yr), int(e_yr)
-                    # select columns
-                    sel = []
-                    for c in df.columns:
-                        m = re.match(r"([A-Za-z]+)-(\d{4})", c)
-                        if m:
-                            mn,yr = month_map[m.group(1).lower()], int(m.group(2))
-                            if (yr> s_yr or (yr==s_yr and mn>=s_val)) and (yr< e_yr or (yr==e_yr and mn<=e_val)):
-                                sel.append(c)
-                    if sel:
+                # extract all month-year tokens
+                tokens = re.findall(r"([A-Za-z]+-\d{4})", q)
+                # find date columns
+                date_cols = [c for c in df.columns if re.match(r"[A-Za-z]+-\d{4}", c)]
+                # map month names
+                month_map = { m:i+1 for i,m in enumerate(["january","february","march","april","may","june","july","august","september","october","november","december"]) }
+                # helper to sort cols
+                def col_key(c):
+                    m,y = c.split('-')
+                    return (int(y), month_map.get(m.lower(), 0))
+                date_cols_sorted = sorted(date_cols, key=col_key)
+
+                if len(tokens) == 2:
+                    start_token, end_token = tokens
+                    if start_token in date_cols_sorted and end_token in date_cols_sorted:
+                        i1 = date_cols_sorted.index(start_token)
+                        i2 = date_cols_sorted.index(end_token)
+                        sel = date_cols_sorted[min(i1,i2):max(i1,i2)+1]
+                    else:
+                        sel = []
+                    if not sel:
+                        st.error("No data columns found for that date range.")
+                    else:
                         rev = df[sel].clip(lower=0).sum().sum()
                         cost = df[sel].clip(upper=0).abs().sum().sum()
                         profit = rev - cost
-                        label = f"{s_mon.title()} {s_yr} to {e_mon.title()} {e_yr}"
+                        label = f"{start_token} to {end_token}"
                         st.markdown(f"**Profitability ({label}):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-                    else:
-                        st.error("No data columns found for that date range.")
-                else:
-                    # single month pattern
-                    single_pat = r"(january|february|march|april|may|june|july|august|september|october|november|december)-(\d{4})"
-                    m1 = re.search(single_pat, q)
-                    if m1:
-                        mon,yr = m1.groups()
-                        key = f"{mon.capitalize()}-{yr}"
-                        if key in df.columns:
-                            rev = df[key].clip(lower=0).sum()
-                            cost = df[key].clip(upper=0).abs().sum()
-                            profit = rev - cost
-                            st.markdown(f"**Profitability for {key}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
-                        else:
-                            st.error(f"Column '{key}' not found.")
-                    else:
-                        # annual
-                        rev = df[num_cols].clip(lower=0).sum().sum()
-                        cost = df[num_cols].clip(upper=0).abs().sum().sum()
+
+                elif len(tokens) == 1:
+                    key = tokens[0]
+                    if key in df.columns:
+                        rev = df[key].clip(lower=0).sum()
+                        cost = df[key].clip(upper=0).abs().sum()
                         profit = rev - cost
-                        st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+                        st.markdown(f"**Profitability for {key}:** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+                    else:
+                        st.error(f"Column '{key}' not found.")
+
+                else:
+                    rev = df[num_cols].clip(lower=0).sum().sum()
+                    cost = df[num_cols].clip(upper=0).abs().sum().sum()
+                    profit = rev - cost
+                    st.markdown(f"**Profitability (year):** {profit:,.2f}  \n*(Revenue {rev:,.2f} – Cost {cost:,.2f})*")
+
             else:
                 # fallback to LLM
                 with st.spinner("Thinking…"):
